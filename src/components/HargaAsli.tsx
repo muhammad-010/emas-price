@@ -10,8 +10,9 @@ import type { HasilEmas } from "@/lib/emas";
 
 const KUNCI_STORAGE = "emas-hitung:harga-asli";
 const KELIPATAN = 5000;
-// Harga asli awal: Senin, 23 Nov 2026 (hari kunci 11:40 WIB)
-const AWAL: Jangkar = { tanggal: "2026-11-23", harga: 2_045_000, manual: true };
+// Harga asli awal: Selasa, 24 Nov 2026 (hari kunci 11:40 WIB).
+// Mengalahkan simpanan otomatis di browser yang tanggalnya <= ini; koreksi manual yang lebih baru tetap dipakai.
+const AWAL: Jangkar = { tanggal: "2026-11-24", harga: 2_055_000, manual: true };
 
 type Jangkar = { tanggal: string; harga: number; manual?: boolean }; // tanggal = YYYY-MM-DD (WIB)
 
@@ -45,7 +46,11 @@ function simpan(j: Jangkar) {
 function parse(raw: string | null): Jangkar {
   try {
     const j = raw ? JSON.parse(raw) : null;
-    if (j && typeof j.tanggal === "string" && Number.isFinite(j.harga)) return j;
+    if (j && typeof j.tanggal === "string" && Number.isFinite(j.harga)) {
+      if (j.tanggal < AWAL.tanggal) return AWAL;
+      if (j.tanggal === AWAL.tanggal && !j.manual) return AWAL;
+      return j;
+    }
   } catch {}
   return AWAL;
 }
