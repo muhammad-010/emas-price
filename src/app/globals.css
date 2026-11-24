@@ -9,3 +9,19 @@ body {
   background: #09090b;
   color: #f4f4f5;
 }
+
+/* Efek kedip saat Harga Asli berubah */
+@keyframes kedip-naik {
+  0% { color: #34d399; text-shadow: 0 0 18px rgb(52 211 153 / 0.8); transform: translateY(4px); }
+  100% { transform: none; }
+}
+@keyframes kedip-turun {
+  0% { color: #fb7185; text-shadow: 0 0 18px rgb(251 113 133 / 0.8); transform: translateY(-4px); }
+  100% { transform: none; }
+}
+.kedip { display: inline-block; }
+.kedip-naik { animation: kedip-naik 1.4s ease-out; }
+.kedip-turun { animation: kedip-turun 1.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .kedip-naik, .kedip-turun { animation: none; }
+}

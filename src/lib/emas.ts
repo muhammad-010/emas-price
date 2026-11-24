@@ -15,13 +15,23 @@ export type HasilEmas = {
   targetAcuan: string; // ISO, 11:40 WIB yang dituju (hari ini / kemarin)
   acuanHariIni: boolean;
   jamAcuan: string; // "11:40"
+  // Hasil naik/turun yang dikunci pada 11:40 WIB:
+  // (harga 11:40 hari acuan − harga 11:40 hari bursa sebelumnya) × PENGALI
+  kunci: (Kunci & { arah: "naik" | "turun" | "tetap"; hariIni: boolean }) | null;
+  // Semua kunci harian yang tersedia di data (urut lama -> baru), untuk menghitung Harga Asli berantai
+  riwayatKunci: Kunci[];
   selisihPoin: number;
   hasil: number; // selisihPoin * PENGALI
   arah: "naik" | "turun" | "tetap";
   pengali: number;
   sumber: string;
-  catatan?: string;
   diambilPada: string;
+};
+
+export type Kunci = {
+  tanggal: string; // ISO 11:40 WIB hari yang dikunci
+  pembanding: string; // ISO 11:40 WIB hari bursa sebelumnya
+  hasil: number;
 };
 
 type Candle = { t: number; open: number; close: number }; // t = epoch ms (awal candle)
@@ -47,6 +57,23 @@ function hargaPadaWaktu(candles: Candle[], target: number): { harga: number; t: 
   return { harga: c.close, t: c.t + CANDLE_MS };
 }
 
+const SEHARI_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Harga 11:40 WIB pada hari bursa terakhir yang <= mulai.
+ * Hari tanpa perdagangan di jam itu (Sabtu/Minggu/libur) dilewati.
+ */
+function hargaHariBursa(candles: Candle[], mulai: number) {
+  for (let k = 0; k < 7; k++) {
+    const target = mulai - k * SEHARI_MS;
+    const h = hargaPadaWaktu(candles, target);
+    if (h && h.t >= target - 30 * 60 * 1000) return { ...h, target };
+  }
+  return null;
+}
+
+const arahDari = (n: number) => (n > 0 ? "naik" : n < 0 ? "turun" : "tetap") as "naik" | "turun" | "tetap";
+
 const UA = { "User-Agent": "Mozilla/5.0 (compatible; emas-hitung/1.0)" };
 
 async function ambilJson(url: string, init?: RequestInit) {
@@ -62,7 +89,7 @@ async function dariTwelveData(apiKey: string) {
   const [harga, seri] = await Promise.all([
     ambilJson(`${base}/price?symbol=XAU/USD&apikey=${apiKey}`),
     ambilJson(
-      `${base}/time_series?symbol=XAU/USD&interval=5min&outputsize=800&timezone=UTC&apikey=${apiKey}`
+      `${base}/time_series?symbol=XAU/USD&interval=5min&outputsize=1200&timezone=UTC&apikey=${apiKey}`
     ),
   ]);
   if (harga.status === "error" || seri.status === "error") {
@@ -119,7 +146,7 @@ export async function hitungEmas(): Promise<HasilEmas> {
   const data = key ? await dariTwelveData(key) : await dariGoldApiYahoo();
 
   const { target, hariIni } = targetJamAcuan();
-  const acuan = hargaPadaWaktu(data.candles, target);
+  const acuan = hargaHariBursa(data.candles, target);
   if (!acuan) throw new Error(`Data harga jam ${LABEL_ACUAN} WIB tidak ditemukan`);
 
   const hargaAcuan = round2(acuan.harga - data.koreksiBasis);
@@ -127,25 +154,41 @@ export async function hitungEmas(): Promise<HasilEmas> {
   const selisihPoin = round2(hargaLive - hargaAcuan);
   const hasil = Math.round(selisihPoin * PENGALI);
 
-  let catatan: string | undefined;
-  if (acuan.t < target - 60 * 60 * 1000) {
-    catatan = `Pasar tutup saat jam ${LABEL_ACUAN} WIB, dipakai harga terakhir sebelum jam tersebut.`;
+  // Kunci: dua harga dari seri yang sama, jadi koreksi basis saling meniadakan -> nilainya stabil
+  const hariBursa = [acuan];
+  while (hariBursa.length < 10) {
+    const p = hargaHariBursa(data.candles, hariBursa.at(-1)!.target - SEHARI_MS);
+    if (!p) break;
+    hariBursa.push(p);
   }
+  const riwayatKunci: Kunci[] = [];
+  for (let i = hariBursa.length - 2; i >= 0; i--) {
+    riwayatKunci.push({
+      tanggal: new Date(hariBursa[i].target).toISOString(),
+      pembanding: new Date(hariBursa[i + 1].target).toISOString(),
+      hasil: Math.round(round2(hariBursa[i].harga - hariBursa[i + 1].harga) * PENGALI),
+    });
+  }
+  const terakhir = riwayatKunci.at(-1);
+  const kunci = terakhir
+    ? { ...terakhir, arah: arahDari(terakhir.hasil), hariIni: hariIni && acuan.target === target }
+    : null;
 
   return {
     hargaLive,
     waktuLive: new Date(data.waktuLive).toISOString(),
     hargaAcuan,
-    waktuAcuan: new Date(Math.min(acuan.t, target)).toISOString(),
-    targetAcuan: new Date(target).toISOString(),
-    acuanHariIni: hariIni,
+    waktuAcuan: new Date(acuan.t).toISOString(),
+    targetAcuan: new Date(acuan.target).toISOString(),
+    acuanHariIni: hariIni && acuan.target === target,
     jamAcuan: LABEL_ACUAN,
+    kunci,
+    riwayatKunci,
     selisihPoin,
     hasil,
-    arah: selisihPoin > 0 ? "naik" : selisihPoin < 0 ? "turun" : "tetap",
+    arah: arahDari(selisihPoin),
     pengali: PENGALI,
     sumber: data.sumber,
-    catatan,
     diambilPada: new Date().toISOString(),
   };
 }

@@ -2,12 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { HasilEmas } from "@/lib/emas";
+import HargaAsli from "./HargaAsli";
 
 const INTERVAL_MS = 5 * 60 * 1000; // reload tiap 5 menit
 
 const fmtUsd = (n: number) =>
   n.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtAngka = (n: number) => Math.abs(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+const fmtTanggal = (iso: string) =>
+  new Date(iso).toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
 const fmtWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", {
     timeZone: "Asia/Jakarta",
@@ -91,7 +99,7 @@ export default function PapanEmas() {
       {data && (
         <>
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-center">
-            <p className="text-sm uppercase tracking-wide text-zinc-400">Hasil</p>
+            <p className="text-sm uppercase tracking-wide text-zinc-400">Hasil Live</p>
             <p className={`mt-1 font-mono text-5xl font-bold tabular-nums ${warna}`}>
               {data.hasil < 0 ? "−" : data.hasil > 0 ? "+" : ""}Rp{fmtAngka(data.hasil)}
             </p>
@@ -99,6 +107,10 @@ export default function PapanEmas() {
               {panah} {data.arah.toUpperCase()}
             </p>
           </section>
+
+          {data.kunci && <KartuKunci kunci={data.kunci} jam={data.jamAcuan} />}
+
+          <HargaAsli data={data} />
 
           <section className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
@@ -110,20 +122,15 @@ export default function PapanEmas() {
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
               <p className="text-xs uppercase tracking-wide text-zinc-400">
-                Acuan {data.jamAcuan} WIB {data.acuanHariIni ? "hari ini" : "kemarin"}
+                Acuan {data.jamAcuan} WIB
               </p>
               <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-zinc-100">
                 {fmtUsd(data.hargaAcuan)}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">{fmtWaktu(data.waktuAcuan)}</p>
+              <p className="mt-1 text-xs text-zinc-500">{fmtTanggal(data.targetAcuan)} · {data.jamAcuan} WIB</p>
             </div>
           </section>
 
-          {data.catatan && (
-            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
-              {data.catatan}
-            </p>
-          )}
 
           <footer className="space-y-1 text-center text-xs text-zinc-500">
             <p>
@@ -139,5 +146,42 @@ export default function PapanEmas() {
         © 2026 · development by <span className="text-amber-300">@fyd</span>
       </p>
     </main>
+  );
+}
+
+const gaya = (arah: HasilEmas["arah"]) =>
+  arah === "naik"
+    ? { warna: "text-emerald-400", panah: "▲" }
+    : arah === "turun"
+      ? { warna: "text-rose-400", panah: "▼" }
+      : { warna: "text-zinc-300", panah: "■" };
+
+const fmtRp = (n: number) => `${n < 0 ? "−" : n > 0 ? "+" : ""}Rp${fmtAngka(n)}`;
+
+function KartuKunci({ kunci, jam }: { kunci: NonNullable<HasilEmas["kunci"]>; jam: string }) {
+  const { warna, panah } = gaya(kunci.arah);
+  return (
+    <section className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-amber-200/80">
+            🔒 Kunci {kunci.hariIni ? "hari ini" : "sebelumnya"}
+          </p>
+          <p className="mt-0.5 text-sm text-zinc-300">
+            {fmtTanggal(kunci.tanggal)} · {jam} WIB
+          </p>
+        </div>
+        <div className="text-right">
+          <p className={`font-mono text-3xl font-bold tabular-nums ${warna}`}>{fmtRp(kunci.hasil)}</p>
+          <p className={`text-sm font-medium ${warna}`}>
+            {panah} {kunci.arah.toUpperCase()}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-zinc-500">
+        Dibanding {fmtTanggal(kunci.pembanding)}.
+        {!kunci.hariIni && ` Kunci hari ini muncul pukul ${jam} WIB.`}
+      </p>
+    </section>
   );
 }

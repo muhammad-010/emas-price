@@ -11,6 +11,15 @@ contoh: (3700 − 3600) = 100 × 320 = 32.000 (naik)
 - Bila pasar tutup di jam itu (akhir pekan), dipakai harga terakhir sebelumnya.
 - Data reload otomatis tiap 5 menit (bisa juga tombol Refresh).
 
+## Kunci & Harga Asli
+
+- **Kunci**: setiap hari bursa pukul 11:40 WIB, hasil dikunci = (harga 11:40 hari itu − harga 11:40 hari bursa sebelumnya) × 320. Sabtu/Minggu/libur dilewati.
+- **Harga Asli** = Harga Asli hari bursa sebelumnya + hasil kunci yang dibulatkan ke kelipatan Rp5.000 terdekat.
+  Titik awal: Rp2.045.000 (Senin, 23 Nov 2026) — ubah di `AWAL` pada `src/components/HargaAsli.tsx`.
+- Tombol **Koreksi** untuk memperbaiki Harga Asli secara manual. Tersimpan di localStorage browser
+  (hanya di perangkat yang dipakai mengoreksi); perhitungan berikutnya melanjutkan dari angka koreksi.
+- **Estimasi sekarang** = Harga Asli + hasil live dibulatkan ke Rp5.000.
+
 ## Sumber data
 
 | Mode | Live | Acuan 11:40 WIB |
