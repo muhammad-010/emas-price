@@ -12,7 +12,7 @@ const KUNCI_STORAGE = "emas-hitung:harga-asli";
 const KELIPATAN = 5000;
 // Harga asli awal: Selasa, 24 Nov 2026 (hari kunci 11:40 WIB).
 // Mengalahkan simpanan otomatis di browser yang tanggalnya <= ini; koreksi manual yang lebih baru tetap dipakai.
-const AWAL: Jangkar = { tanggal: "2026-11-24", harga: 2_055_000, manual: true };
+const AWAL: Jangkar = { tanggal: "2026-11-24", harga: 2_060_000, manual: true };
 
 type Jangkar = { tanggal: string; harga: number; manual?: boolean }; // tanggal = YYYY-MM-DD (WIB)
 
