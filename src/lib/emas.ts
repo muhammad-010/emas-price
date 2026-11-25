@@ -1,3 +1,5 @@
+import { cacheLife } from "next/cache";
+
 // Logika pengambilan harga XAUUSD dan perhitungan selisih terhadap harga jam 11:40 WIB.
 
 export const PENGALI = 320;
@@ -25,6 +27,7 @@ export type HasilEmas = {
   arah: "naik" | "turun" | "tetap";
   pengali: number;
   sumber: string;
+  perkiraan: boolean;
   diambilPada: string;
 };
 
@@ -61,11 +64,14 @@ const SEHARI_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Harga 11:40 WIB pada hari bursa terakhir yang <= mulai.
- * Hari tanpa perdagangan di jam itu (Sabtu/Minggu/libur) dilewati.
+ * Sabtu & Minggu (WIB) selalu dilewati — Twelve Data tetap mengirim harga di akhir pekan
+ * walau pasar XAUUSD tutup. Hari tanpa data di jam itu (libur) juga dilewati.
  */
 function hargaHariBursa(candles: Candle[], mulai: number) {
   for (let k = 0; k < 7; k++) {
     const target = mulai - k * SEHARI_MS;
+    const hariWib = new Date(target + WIB_OFFSET_MS).getUTCDay();
+    if (hariWib === 0 || hariWib === 6) continue;
     const h = hargaPadaWaktu(candles, target);
     if (h && h.t >= target - 30 * 60 * 1000) return { ...h, target };
   }
@@ -82,74 +88,98 @@ async function ambilJson(url: string, init?: RequestInit) {
   return res.json();
 }
 
-// ---------- Sumber 1: Twelve Data (XAU/USD spot murni, butuh API key gratis) ----------
+// Twelve Data hanya dipakai untuk candle (harga 11:40 WIB & kunci harian); harga live tetap dari gold-api.com.
+// Key bisa ditimpa lewat env TWELVEDATA_API_KEY.
+const TWELVEDATA_KEY = process.env.TWELVEDATA_API_KEY || "9ccabb5be2f24fb990524e2b5dc789a1";
 
-async function dariTwelveData(apiKey: string) {
-  const base = "https://api.twelvedata.com";
-  const [harga, seri] = await Promise.all([
-    ambilJson(`${base}/price?symbol=XAU/USD&apikey=${apiKey}`),
-    ambilJson(
-      `${base}/time_series?symbol=XAU/USD&interval=5min&outputsize=1200&timezone=UTC&apikey=${apiKey}`
-    ),
-  ]);
-  if (harga.status === "error" || seri.status === "error") {
-    throw new Error(`Twelve Data: ${harga.message ?? seri.message}`);
-  }
-  const candles: Candle[] = (seri.values ?? []).map(
-    (v: { datetime: string; open: string; close: string }) => ({
+// Candle 5 menit ~7 hari ke belakang: cukup untuk acuan, kunci, dan riwayat yang melewati akhir pekan
+const JUMLAH_CANDLE = 2000;
+
+type Live = { harga: number; waktu: number };
+
+async function ambilLive(): Promise<Live> {
+  const spot = await ambilJson("https://api.gold-api.com/price/XAU");
+  const harga = Number(spot.price);
+  if (!Number.isFinite(harga)) throw new Error("Harga live tidak valid");
+  return { harga, waktu: Date.parse(spot.updatedAt) || Date.now() };
+}
+
+/**
+ * Candle XAU/USD spot dari Twelve Data — target: 1 kredit per hari.
+ * Satu panggilan sudah berisi harga 11:40 hari ini + riwayat beberapa hari ke belakang.
+ * Di-cache per tanggal acuan (`targetIso`): disimpan sampai tanggal acuan berganti,
+ * tidak pernah disegarkan ulang di tengah hari.
+ */
+async function candleTwelveData(targetIso: string): Promise<Candle[]> {
+  "use cache: remote";
+  const seri = await ambilJson(
+    `https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=5min&outputsize=${JUMLAH_CANDLE}&timezone=UTC&apikey=${TWELVEDATA_KEY}`
+  );
+  if (seri.status === "error") throw new Error(`Twelve Data: ${seri.message}`);
+  const candles: Candle[] = (seri.values ?? [])
+    .map((v: { datetime: string; open: string; close: string }) => ({
       t: Date.parse(v.datetime.replace(" ", "T") + "Z"),
       open: Number(v.open),
       close: Number(v.close),
-    })
-  );
-  return {
-    hargaLive: Number(harga.price),
-    waktuLive: Date.now(),
-    candles,
-    koreksiBasis: 0,
-    sumber: "Twelve Data XAU/USD (spot)",
-  };
+    }))
+    .sort((x: Candle, y: Candle) => x.t - y.t);
+
+  // Data untuk satu tanggal acuan tidak berubah -> simpan lama; besok kuncinya sudah beda
+  cacheLife({ stale: 3600, revalidate: 3 * 86400, expire: 7 * 86400 });
+  return candles;
 }
 
-// ---------- Sumber 2 (default, tanpa key): gold-api.com spot + Yahoo GC=F intraday ----------
-
-async function dariGoldApiYahoo() {
-  const [spot, yahoo] = await Promise.all([
-    ambilJson("https://api.gold-api.com/price/XAU"),
-    ambilJson("https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?interval=5m&range=5d"),
-  ]);
+/** Cadangan bila Twelve Data gagal: Yahoo GC=F futures (perkiraan, bisa beda dari spot). */
+async function candleYahoo(): Promise<Candle[]> {
+  const yahoo = await ambilJson("https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?interval=5m&range=5d");
   const r = yahoo?.chart?.result?.[0];
   if (!r) throw new Error("Yahoo Finance tidak mengembalikan data GC=F");
   const ts: number[] = r.timestamp ?? [];
   const q = r.indicators?.quote?.[0] ?? {};
-  const candles: Candle[] = ts
+  return ts
     .map((t, i) => ({ t: t * 1000, open: q.open?.[i], close: q.close?.[i] }))
     .filter((c) => typeof c.open === "number" && typeof c.close === "number");
+}
 
-  const hargaSpot = Number(spot.price);
-  const futuresSekarang = Number(r.meta?.regularMarketPrice ?? candles.at(-1)?.close);
-  if (!Number.isFinite(hargaSpot) || !Number.isFinite(futuresSekarang)) {
-    throw new Error("Harga live tidak valid");
+// Lapisan memori per proses server: tetap hemat walau cache Next dilewati
+// (mis. refresh browser saat `next dev`).
+const memori = new Map<string, Candle[]>();
+const JEDA_AMBIL_MS = 5 * 60 * 1000; // ambil data hari baru mulai 11:45, saat candle 11:40 sudah lengkap
+
+async function ambilCandle(target: number) {
+  // Sebelum 11:45 tetap pakai data tanggal acuan sebelumnya -> tidak ada pengambilan ulang
+  const siap = Date.now() >= target + JEDA_AMBIL_MS;
+  const kunciCache = new Date(siap ? target : target - SEHARI_MS).toISOString();
+  try {
+    let candles = memori.get(kunciCache);
+    if (!candles) {
+      candles = await candleTwelveData(kunciCache);
+      memori.clear();
+      memori.set(kunciCache, candles);
+    }
+    return { candles, perkiraan: false };
+  } catch (e) {
+    console.error("Twelve Data gagal, pakai Yahoo:", e);
+    return { candles: await candleYahoo(), perkiraan: true };
   }
-  return {
-    hargaLive: hargaSpot,
-    waktuLive: Date.parse(spot.updatedAt) || Date.now(),
-    candles,
-    // GC=F (futures) lebih mahal beberapa dolar dari spot; acuan dikoreksi dengan selisih ini
-    koreksiBasis: futuresSekarang - hargaSpot,
-    sumber: "gold-api.com (spot live) + Yahoo GC=F 5m (acuan, dikoreksi basis)",
-  };
 }
 
 export async function hitungEmas(): Promise<HasilEmas> {
-  const key = process.env.TWELVEDATA_API_KEY;
-  const data = key ? await dariTwelveData(key) : await dariGoldApiYahoo();
-
   const { target, hariIni } = targetJamAcuan();
+  const [live, seri] = await Promise.all([ambilLive(), ambilCandle(target)]);
+  const data = {
+    hargaLive: live.harga,
+    waktuLive: live.waktu,
+    candles: seri.candles,
+    perkiraan: seri.perkiraan,
+    sumber: seri.perkiraan
+      ? "gold-api.com (live) + Yahoo GC=F futures (acuan, perkiraan — Twelve Data gagal)"
+      : "gold-api.com (live) + Twelve Data XAU/USD (acuan 11:40)",
+  };
   const acuan = hargaHariBursa(data.candles, target);
   if (!acuan) throw new Error(`Data harga jam ${LABEL_ACUAN} WIB tidak ditemukan`);
 
-  const hargaAcuan = round2(acuan.harga - data.koreksiBasis);
+  const hargaAcuan = round2(acuan.harga);
   const hargaLive = round2(data.hargaLive);
   const selisihPoin = round2(hargaLive - hargaAcuan);
   const hasil = Math.round(selisihPoin * PENGALI);
@@ -189,6 +219,7 @@ export async function hitungEmas(): Promise<HasilEmas> {
     arah: arahDari(selisihPoin),
     pengali: PENGALI,
     sumber: data.sumber,
+    perkiraan: data.perkiraan,
     diambilPada: new Date().toISOString(),
   };
 }

@@ -108,6 +108,13 @@ export default function PapanEmas() {
             </p>
           </section>
 
+          {data.perkiraan && (
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              Twelve Data sedang tidak bisa diakses, acuan sementara diambil dari harga futures (perkiraan,
+              bisa sedikit beda dari XAUUSD spot).
+            </p>
+          )}
+
           {data.kunci && <KartuKunci kunci={data.kunci} jam={data.jamAcuan} />}
 
           <HargaAsli data={data} />

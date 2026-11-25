@@ -13,7 +13,7 @@ contoh: (3700 − 3600) = 100 × 320 = 32.000 (naik)
 
 ## Kunci & Harga Asli
 
-- **Kunci**: setiap hari bursa pukul 11:40 WIB, hasil dikunci = (harga 11:40 hari itu − harga 11:40 hari bursa sebelumnya) × 320. Sabtu/Minggu/libur dilewati.
+- **Kunci**: setiap hari bursa pukul 11:40 WIB, hasil dikunci = (harga 11:40 hari itu − harga 11:40 hari bursa sebelumnya) × 320. Sabtu/Minggu selalu dilewati (Senin dibanding Jumat).
 - **Harga Asli** = Harga Asli hari bursa sebelumnya + hasil kunci yang dibulatkan ke kelipatan Rp5.000 terdekat.
   Titik awal: Rp2.060.000 (Selasa, 24 Nov 2026) — ubah di `AWAL` pada `src/components/HargaAsli.tsx`.
 - Tombol **Koreksi** untuk memperbaiki Harga Asli secara manual. Tersimpan di localStorage browser
@@ -22,10 +22,11 @@ contoh: (3700 − 3600) = 100 × 320 = 32.000 (naik)
 
 ## Sumber data
 
-| Mode | Live | Acuan 11:40 WIB |
-|---|---|---|
-| Default (tanpa key) | gold-api.com XAU spot | Yahoo GC=F candle 5m, dikoreksi selisih futures–spot |
-| `TWELVEDATA_API_KEY` diisi | Twelve Data XAU/USD | Twelve Data XAU/USD candle 5m |
+- **Harga live**: gold-api.com (XAU spot).
+- **Harga 11:40 WIB & kunci harian**: Twelve Data XAU/USD candle 5 menit. Key bawaan ada di `src/lib/emas.ts`,
+  bisa ditimpa env `TWELVEDATA_API_KEY`. Hasilnya di-cache per tanggal (`use cache: remote`), jadi kuota
+  800 kredit/hari hampir tidak terpakai.
+- Bila Twelve Data gagal: cadangan Yahoo GC=F futures (ditandai "perkiraan" di halaman).
 
 Pengali (320) ada di `src/lib/emas.ts` (`PENGALI`).
 
